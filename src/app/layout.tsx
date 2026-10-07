@@ -1,6 +1,7 @@
 /** Root layout. Rendered per request (`connection()`) because APP_NAME comes from runtime env. */
 
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { connection } from 'next/server';
 import { getUser } from '@/lib/auth/session';
@@ -13,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: getConfig().APP_NAME };
 }
 
-export default async function RootLayout({ children }: LayoutProps<'/'>) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection();
   const user = await getUser();
   return (
