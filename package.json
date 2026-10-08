@@ -36,7 +36,7 @@
     "@types/twitter-text": "^3.1.10",
     "@vitest/coverage-v8": "^5.0.3",
     "drizzle-kit": "^0.31.11",
-    "eslint": "^9",
+    "eslint": "^10.0.0",
     "eslint-config-next": "16.4.0",
     "jsdom": "^30.1.2",
     "tailwindcss": "^4",
