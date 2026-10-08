@@ -6,7 +6,8 @@ Next.js + PostgreSQL + S3-compatible storage, shipped as one Docker image.
 
 ## Features
 
-- Multiple users; email + password accounts (registration can be disabled)
+- Multiple users; email + password accounts (registration can be disabled); with SMTP configured, email
+  confirmation and password reset
 - Many accounts per platform, each with a label like `mastodon-work`
 - Single posts or **floods**: an ordered list of posts published as a reply chain
 - Images and videos with alt text; optional TinyPNG compression
@@ -23,14 +24,15 @@ docker compose up --build     # or `make up` (same, detached)
 To run the published image instead of building, swap `build: .` for the commented `image:` line in
 `docker-compose.yml` and run `docker compose up`.
 
-Open http://localhost:3000 and register. Compose starts the app, PostgreSQL 17 and S3Mock (local S3).
+Open http://localhost:3000 and register. Compose starts the app, PostgreSQL 17, S3Mock (local S3) and Mailpit
+(catches outgoing mail, http://localhost:8025).
 Migrations and the bucket are created when the app starts.
 
 **Accounts.** There is no seeded user or generated password: the first person to open the app registers, even
 with `ALLOW_REGISTRATION=false`. There is no admin interface; every user manages only their own connections and
-posts. The app sends no email, so there is no SMTP setting and no password reset (reset a password by deleting the
-user row and registering again). Migrations run automatically at startup from `drizzle/`; there is no seeder
-because none is needed.
+posts. With email configured, new accounts confirm their address and passwords can be reset by email (see
+[Email](#email)); without it, signup is instant and there is no reset. Migrations run automatically at startup
+from `drizzle/`; there is no seeder because none is needed.
 
 ## Configuration
 
@@ -58,12 +60,41 @@ All settings are env vars (`.env`). They are validated at startup; invalid value
 | `COOKIE_SECURE` | `auto` | `auto` = secure cookies when `NODE_ENV=production`; or `true` / `false` |
 | `MAX_UPLOAD_MB` | `50` | Max size per uploaded file |
 | `ALLOW_REGISTRATION` | `true` | `false` hides and blocks `/register` once the first account exists |
+| `SMTP_URL` | empty | SMTP server URL (`smtp://host:1025`, `smtp://user:pass@host:587` STARTTLS, `smtps://user:pass@host:465`); email features are on iff set. Compose sets Mailpit |
+| `MAIL_FROM` | `no-reply@localhost` | Sender address; the display name is `APP_NAME` |
 
 `MAX_UPLOAD_MB` can only lower the limit: the request body cap (`bodySizeLimit` in `next.config.ts`) is fixed at
 50 MB at build time. Raising it needs an edit there and a rebuild.
 
 The Docker image runs with `NODE_ENV=production`, so with `COOKIE_SECURE=auto` cookies are secure-only. Browsers
 such as Chrome and Firefox accept them on `http://localhost`; for any other plain-HTTP host set `COOKIE_SECURE=false` or put HTTPS in front.
+
+## Email
+
+Email is on when `SMTP_URL` is set, off when it is empty. `MAIL_FROM` is the sender address; the sender name is
+`APP_NAME`. Mail is plain text, and links in it are built from `APP_URL`, so set that to the address users open.
+
+`SMTP_URL` takes one of three forms (percent-encode special characters in the user and password, e.g. `@` → `%40`):
+
+- `smtp://host:1025`: no login (local catchers like Mailpit)
+- `smtp://user:pass@smtp.example.com:587`: login, upgraded with STARTTLS
+- `smtps://user:pass@smtp.example.com:465`: login over implicit TLS
+
+`docker compose` ships [Mailpit](https://mailpit.axllent.org/), which catches every outgoing mail: SMTP on port
+1025, web UI at http://localhost:8025. The app uses it unless `.env` sets `SMTP_URL` to a real server.
+
+With email on:
+- **Signup needs a confirmed address.** Registering sends a confirmation link (valid 24 hours) instead of signing
+  in. Logging in to an unconfirmed account sends a fresh link. If the confirmation email cannot be sent, the
+  account is not created.
+- **Password reset.** "Forgot password?" on the login page mails a reset link (valid 1 hour). Setting a new password
+  signs out every other session of that account and also confirms the address.
+- Links are single use. Opening one shows a button; nothing happens until it is pressed, so mail scanners that
+  prefetch links cannot use them up.
+
+With email off, signup signs in immediately and there is no password reset: to recover an account, delete its row
+from the `users` table and register again. Accounts created while email was off are asked to confirm their address
+at their next login once `SMTP_URL` is set (accounts older than the email feature count as confirmed).
 
 ## Connecting accounts
 
@@ -123,15 +154,17 @@ The connect form is rendered from `fields`; the publish engine handles splitting
 
 ```sh
 npm ci
-docker compose up -d db s3mock
-npm test -- --coverage     # real Postgres + S3Mock
+docker compose up -d db s3mock mailpit
+npm test -- --coverage     # real Postgres + S3Mock; one test sends through Mailpit
 npm run lint
 npx tsc --noEmit
 npm run dev                # needs .env with localhost DATABASE_URL / S3_ENDPOINT (the .env.example defaults)
 ```
 
 Tests use `TEST_DATABASE_URL` (default `postgres://postgres:postgres@localhost:5432/multiposter_test`, created if
-missing) and `TEST_S3_ENDPOINT` (default `http://localhost:9090`); they never read `.env`.
+missing), `TEST_S3_ENDPOINT` (default `http://localhost:9090`), `TEST_SMTP_URL` (default `smtp://localhost:1025`) and
+`TEST_MAILPIT_URL` (default `http://localhost:8025`); they never read `.env`. Email is off in tests except in that
+one Mailpit test.
 Schema changes: edit `src/lib/db/schema.ts`, run `npm run db:generate`, commit `drizzle/`.
 
 ### Using make

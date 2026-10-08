@@ -26,4 +26,15 @@ describe('AuthForm', () => {
     expect(pw).toHaveProperty('autocomplete', 'new-password');
     expect(pw).toHaveProperty('minLength', 8);
   });
+
+  it('posts a hidden token with only the chosen fields and shows a returned message as status', async () => {
+    const action = vi.fn(async (_s: unknown, _f: FormData) => ({ message: 'Done.' })); // eslint-disable-line @typescript-eslint/no-unused-vars
+    render(<AuthForm action={action} label="Set password" fields={['password']} minPassword={8} token="tok" />);
+    expect(screen.queryByLabelText('Email')).toBeNull();
+    await userEvent.type(screen.getByLabelText('Password'), 'new-password');
+    await userEvent.click(screen.getByRole('button', { name: 'Set password' }));
+    expect((await screen.findByRole('status')).textContent).toBe('Done.');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(Object.fromEntries(action.mock.calls[0][1])).toEqual({ token: 'tok', password: 'new-password' });
+  });
 });

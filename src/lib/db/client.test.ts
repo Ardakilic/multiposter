@@ -41,6 +41,7 @@ describe('schema', () => {
       'users<-user_id:cascade',
       'users<-user_id:cascade',
       'users<-user_id:cascade',
+      'users<-user_id:cascade',
     ]);
   });
 });

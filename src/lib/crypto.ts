@@ -3,6 +3,9 @@ import { getConfig } from './config';
 
 const key = () => createHash('sha256').update(getConfig().APP_SECRET).digest();
 
+/** Hex SHA-256; stored in place of random tokens (sessions, email tokens). */
+export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
 /** AES-256-GCM; returns `iv.tag.ciphertext` (each base64). */
 export function encrypt(value: unknown): string {
   const iv = randomBytes(12);

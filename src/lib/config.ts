@@ -27,6 +27,8 @@ const schema = z
     COOKIE_SECURE: z.enum(['auto', 'true', 'false']).default('auto'),
     MAX_UPLOAD_MB: int(50),
     ALLOW_REGISTRATION: bool('true'),
+    SMTP_URL: z.string().min(1).optional(), // email features are on iff set
+    MAIL_FROM: z.string().min(1).default('no-reply@localhost'),
   })
   .refine((c) => c.NOSTR_MEDIA_HOST !== 'imgur' || c.IMGUR_CLIENT_ID, {
     message: 'IMGUR_CLIENT_ID is required when NOSTR_MEDIA_HOST=imgur',

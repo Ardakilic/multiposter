@@ -6,14 +6,16 @@ Instagram accounts at once, now or scheduled.
 ## Stack
 - Node 24, npm; Next.js 16 App Router + React 19, TypeScript, Tailwind
 - PostgreSQL 17 via drizzle-orm + pg; migrations in `drizzle/`, applied at startup
-- zod 4 (env + forms); S3-compatible storage via @aws-sdk/client-s3 (S3Mock locally/CI)
+- zod 4 (env + forms); S3-compatible storage via @aws-sdk/client-s3 (S3Mock locally/CI); nodemailer (Mailpit locally/CI)
 - SDKs: twitter-api-v2, @atproto/api, nostr-tools, twitter-text
 - vitest + coverage-v8, Testing Library + jsdom; Docker standalone image; GitHub Actions
 
 ## Layout
 - `src/app/` thin pages + server actions: `(auth)`, `compose`, `connections`, `posts`
 - `src/lib/config.ts` zod env -> `getConfig()`
-- `src/lib/db/` schema + client/`migrate()`; `src/lib/auth/` scrypt passwords, DB sessions, `registrationOpen()`
+- `src/lib/db/` schema + client/`migrate()`; `src/lib/auth/` scrypt passwords, DB sessions, `registrationOpen()`,
+  `tokens.ts` (single-use hashed email tokens)
+- `src/lib/mail.ts` `mailEnabled()` + `sendMail()` (nodemailer over `SMTP_URL`)
 - `src/lib/crypto.ts` AES-GCM for stored credentials; `src/lib/storage.ts` S3
 - `src/lib/connectors/` one file per platform + `index.ts` registry; `types.ts` is the `Connector` contract
 - `src/lib/publish/` `publish.ts` (engine) + `worker.ts` (poller); `src/lib/media/`, `src/lib/text/`
@@ -32,7 +34,7 @@ Instagram accounts at once, now or scheduled.
 | `make db-generate` | `npm run db:generate` |
 
 `make up` / `down` / `logs` drive the production `app` image; `make clean` drops all volumes.
-Tests on the host: `docker compose up -d db s3mock`, then `npm test -- --coverage`.
+Tests on the host: `docker compose up -d db s3mock mailpit`, then `npm test -- --coverage`.
 
 ## Quality gate (must pass before any commit)
 `npm run lint && npx tsc --noEmit && npm test -- --coverage && npm run build`. Coverage is kept at 100%; CI fails
@@ -44,6 +46,7 @@ below 95%.
   the SDK / `fetch` and assert request shapes.
 - Tests hit real Postgres and S3Mock; no DB mocks.
 - Everything is published by the in-process worker; "post now" = `scheduledAt` now.
+- Email is on iff `SMTP_URL` is set; tests mock `@/lib/mail`, the Mailpit integration test is the only real send.
 - Stored credentials are encrypted with a key derived from `APP_SECRET`.
 - Keep diffs minimal; no new dependencies without a reason; mark deliberate shortcuts with `// ponytail:` comments.
 

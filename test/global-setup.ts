@@ -13,7 +13,7 @@ const env: Record<string, string> = {
 
 export default async function setup() {
   Object.assign(process.env, env);
-  for (const k of ['S3_PUBLIC_URL', 'TINYPNG_API_KEY', 'IMGUR_CLIENT_ID', 'NOSTR_MEDIA_HOST']) delete process.env[k];
+  for (const k of ['S3_PUBLIC_URL', 'TINYPNG_API_KEY', 'IMGUR_CLIENT_ID', 'NOSTR_MEDIA_HOST', 'SMTP_URL', 'MAIL_FROM']) delete process.env[k];
 
   const url = new URL(env.DATABASE_URL);
   const name = url.pathname.slice(1);

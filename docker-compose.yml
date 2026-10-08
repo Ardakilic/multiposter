@@ -9,12 +9,15 @@ services:
       # in-network addresses; everything else comes from .env
       DATABASE_URL: postgres://postgres:postgres@db:5432/multiposter
       S3_ENDPOINT: http://s3mock:9090
+      SMTP_URL: ${SMTP_URL:-smtp://mailpit:1025} # Mailpit unless .env sets a real SMTP server
     ports:
       - "3000:3000"
     depends_on:
       db:
         condition: service_healthy
       s3mock:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
 
   db:
@@ -43,6 +46,17 @@ services:
       interval: 5s
       retries: 10
 
+  # catches all outgoing mail; web UI at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      retries: 15
+
   # `make` runs npm through this (dev profile); never starts with a plain `docker compose up`
   dev:
     image: node:24-slim
@@ -58,6 +72,9 @@ services:
       TEST_DATABASE_URL: postgres://postgres:postgres@db:5432/multiposter_test
       S3_ENDPOINT: http://s3mock:9090
       TEST_S3_ENDPOINT: http://s3mock:9090
+      SMTP_URL: smtp://mailpit:1025
+      TEST_SMTP_URL: smtp://mailpit:1025
+      TEST_MAILPIT_URL: http://mailpit:8025
       S3_BUCKET: multiposter
       S3_ACCESS_KEY: test
       S3_SECRET_KEY: test
@@ -68,6 +85,8 @@ services:
       db:
         condition: service_healthy
       s3mock:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
 
 volumes:

@@ -19,9 +19,10 @@ Versions checked against npm on 2026-10-08.
 | DB | PostgreSQL 17, drizzle-orm 0.45 + pg, drizzle-kit 0.31; migrations committed in `drizzle/`, applied at startup |
 | Validation | zod 4 (env + forms) |
 | Storage | @aws-sdk/client-s3 + @aws-sdk/s3-request-presigner; S3-compatible; `adobe/s3mock:5.2.3` locally/CI |
+| Email | nodemailer over `SMTP_URL`, plain text; `axllent/mailpit` locally/CI |
 | SDKs | twitter-api-v2 1.29, @atproto/api 0.24, nostr-tools 2.25, twitter-text 3.1 |
 | Tests | vitest 5 + @vitest/coverage-v8, @testing-library/react + jsdom, real Postgres + S3Mock |
-| Ship | Docker multi-stage standalone image; docker compose (app, db, s3mock); GitHub Actions |
+| Ship | Docker multi-stage standalone image; docker compose (app, db, s3mock, mailpit); GitHub Actions |
 
 Deliberately absent: other ORMs, auth libs (stdlib scrypt + DB sessions), job queue (DB polling with
 `FOR UPDATE SKIP LOCKED`), image libs (TinyPNG optional via 2 fetch calls), `proxy.ts`/middleware.
@@ -32,12 +33,14 @@ it lacks replies/threads, video, Instagram, and Nostr media (its Nostr strategy 
 ## 2. Repo layout
 
 ```
-src/app/                 thin pages + server actions: (auth)/login, (auth)/register, connections, compose, posts, layout, page (redirect)
+src/app/                 thin pages + server actions: (auth)/login, register, verify, forgot, reset; connections, compose, posts, layout, page (redirect)
 src/lib/config.ts        zod env -> memoized typed config (getConfig())
 src/lib/db/schema.ts     drizzle tables
 src/lib/db/client.ts     pg Pool + drizzle instance, migrate()
 src/lib/auth/password.ts scrypt hash/verify
 src/lib/auth/session.ts  create/destroy session, cookie, requireUser()
+src/lib/auth/tokens.ts   single-use email tokens (verify / reset), sha256 stored
+src/lib/mail.ts          mailEnabled(), sendMail() via nodemailer
 src/lib/crypto.ts        AES-256-GCM encrypt/decrypt of credentials, key = sha256(APP_SECRET)
 src/lib/storage.ts       S3 put/get/presign, ensureBucket
 src/lib/media/upload.ts  validate + tinify + PutObject
@@ -79,6 +82,8 @@ works without env).
 | COOKIE_SECURE | `auto` | auto = true when NODE_ENV=production |
 | MAX_UPLOAD_MB | `50` | also drives `experimental.serverActions.bodySizeLimit` (see §12) |
 | ALLOW_REGISTRATION | `true` | `false` hides + blocks /register once the first account exists |
+| SMTP_URL | optional | `smtp://host:port`, `smtp://user:pass@host:587` (STARTTLS) or `smtps://user:pass@host:465`; set → email features on (§5). Compose defaults it to Mailpit |
+| MAIL_FROM | `no-reply@localhost` | sender address; display name = APP_NAME |
 
 S3 client: `forcePathStyle`, `requestChecksumCalculation: 'WHEN_REQUIRED'`,
 `responseChecksumValidation: 'WHEN_REQUIRED'` (S3Mock / non-AWS compatibility).
@@ -89,22 +94,25 @@ drizzle; uuid PKs `defaultRandom()`; all timestamps `timestamptz`.
 
 | Table | Columns |
 |---|---|
-| users | id, email unique, password_hash, created_at |
+| users | id, email unique, password_hash, email_verified_at nullable, created_at |
 | sessions | id, user_id→users cascade, token_hash unique, expires_at, created_at |
+| email_tokens | id, user_id→users cascade, purpose enum `verify\|reset`, token_hash unique, expires_at, created_at |
 | connections | id, user_id→users cascade, connector text, label text, account_name text, credentials text (AES-GCM encrypted JSON), settings jsonb, created_at; unique(user_id, label) |
 | posts | id, user_id→users cascade, status enum `scheduled\|publishing\|published\|partial\|failed\|cancelled`, auto_thread bool, scheduled_at not null, created_at, published_at nullable |
 | post_items | id, post_id→posts cascade, position int, text text |
 | media | id, post_item_id→post_items cascade, position int, storage_key, mime, size int, alt nullable |
 | post_targets | id, post_id→posts cascade, connection_id→connections cascade, status enum `pending\|published\|failed`, result jsonb (`{id,url}[]`), error text nullable |
 
-- Session cookie holds a random 32-byte token; DB stores its sha256.
+- Session cookie holds a random 32-byte token; DB stores its sha256. Email tokens likewise (raw token only in the
+  emailed link); one live token per user + purpose, deleted when used.
+- Migration 0001 marks all existing users verified, so turning email on never locks out older accounts.
 - A flood = N items; a single post = 1 item.
 - "Post now" = `scheduled_at = now()`. One code path (the worker) publishes everything.
 - `settings` = connector-specific data captured at verify time (e.g. Mastodon instance limits).
 
 ## 5. Auth
 
-- Register/login are server actions.
+- Register, login, verify, forgot and reset are server actions (`src/app/(auth)/actions.ts`).
 - Password: `crypto.scrypt` N=2^14, r=8, p=1, 16-byte salt; stored `scrypt$N$r$p$salt$hash` (base64); verify with
   `timingSafeEqual`.
 - Cookie: httpOnly, sameSite `lax`, `secure` per config, maxAge = SESSION_TTL_DAYS.
@@ -113,6 +121,31 @@ drizzle; uuid PKs `defaultRandom()`; all timestamps `timestamptz`.
   components; server actions re-check themselves anyway.
 - Registration is open when ALLOW_REGISTRATION=true or the users table is empty (`registrationOpen()`); otherwise
   the register link is hidden and page and action refuse.
+
+### 5.1 Email flows (only when `mailEnabled()`, i.e. SMTP_URL set)
+
+Plain-text mails, links built from APP_URL. Tokens: `createToken` / `consumeToken` (single use, expiry-checked);
+verify 24 h, reset 1 h.
+
+- **Register**: user created unverified, `verify` token mailed ("Confirm your {APP_NAME} account",
+  `{APP_URL}/verify?token=…`), no session; form shows "We sent a confirmation link to {email}. Open it within 24
+  hours to finish signing up." If sending throws, the user row is deleted again and the form shows "Could not send
+  the confirmation email. Check the address and try again." (so the address isn't left dead).
+- **Login**: after a correct password, an unverified user gets a fresh `verify` mail and "Confirm your email first.
+  We sent a new link to {email}." instead of a session. Wrong passwords keep the generic "Invalid credentials.".
+- **/verify**: page shows a "Confirm email" button posting the token (hidden input); a GET never consumes it, so
+  link-prefetching mail scanners can't, and only an action may set the cookie. Action: valid token → set
+  `email_verified_at`, create session, redirect `/compose`; else "This link is invalid or has expired.". No token →
+  the page shows that error directly.
+- **/forgot** (linked from login only when email is on): always answers "If that email has an account, we sent a
+  password reset link." (no enumeration); for an existing user a `reset` token is mailed ("Reset your {APP_NAME}
+  password", `{APP_URL}/reset?token=…`) via `after()`, i.e. after the response, so timing and SMTP errors don't
+  reveal the account either. Email off → "Password reset is unavailable because email is not configured."
+- **/reset**: hidden token + new password (min 8, same rule as register). Valid token → new hash, ALL sessions of the
+  user deleted, `email_verified_at` set if null (the link proves ownership), new session, redirect `/compose`.
+
+Email off: register signs in at once, login ignores `email_verified_at`, no reset (recover by deleting the user row).
+Users who registered while email was off are unverified and get a confirmation mail at their next login once it is on.
 
 ## 6. Connector contract (`src/lib/connectors/types.ts`)
 
@@ -278,12 +311,15 @@ can only lower the effective limit at runtime. Raising above 50 needs a rebuild.
 
 ## 13. GUI
 
-Tailwind, minimal, forms + server actions, `useActionState` for errors. Layout nav shows APP_NAME.
+Tailwind, minimal, forms + server actions, `useActionState` for errors and notices (`{ error?, message? }`). Layout nav shows APP_NAME.
 
 | Route | Content |
 |---|---|
 | `/` | redirect → `/compose` (or `/login`) |
-| `/login`, `/register` | email + password; register hidden when registration is closed (`registrationOpen()`) |
+| `/login`, `/register` | email + password; register hidden when registration is closed (`registrationOpen()`); "Forgot password?" on login when email is on |
+| `/verify?token=` | "Confirm email" button (POST); invalid/missing token → error (§5.1) |
+| `/forgot` | email → reset link (§5.1) |
+| `/reset?token=` | new password (POST with hidden token); missing token → error + link to `/forgot` |
 | `/connections` | list (label, account, connector) + delete; add form: pick connector → inputs from `fields` (secret → password input) + label → verify → save encrypted; shows provider help text |
 | `/compose` | items list (add/remove; each: textarea with live length vs strictest selected limit, multiple file input, alt text), connection checkboxes, "Auto-split into threads when too long", optional `datetime-local`; submit → upload media → insert post/items/media/targets, status `scheduled` |
 | `/posts` | newest first; status badge; scheduled/published time; item text preview; per-target status + link or error; cancel for scheduled |
@@ -305,7 +341,8 @@ Tailwind, minimal, forms + server actions, `useActionState` for errors. Layout n
   docker compose file; test env points at localhost ports). Receives the `TestProject`; may `project.provide(...)`.
 - setup.ts: TRUNCATE all tables between tests.
 - Connectors: `vi.spyOn(globalThis, 'fetch')`; `vi.mock` the SDK modules; assert request shapes.
-- Pages/actions: call as functions; mock `next/headers`, `next/navigation`.
+- Pages/actions: call as functions; mock `next/headers`, `next/navigation`, `@/lib/mail` (only
+  `mail.mailpit.test.ts` sends for real, through Mailpit).
 - Components: RTL + jsdom via `// @vitest-environment jsdom`.
 - CI gates: ESLint, `tsc --noEmit`, tests + coverage thresholds, docker build.
 
@@ -313,12 +350,13 @@ Tailwind, minimal, forms + server actions, `useActionState` for errors. Layout n
 
 - Dockerfile: official Next standalone 3-stage (`node:24-slim`: deps, builder, runner) + `COPY --from=builder /app/drizzle ./drizzle`.
 - docker-compose.yml:
-  - app: `build: .`, env from `.env` with defaults, depends_on db + s3mock `service_healthy`, port 3000.
+  - app: `build: .`, env from `.env` with defaults, depends_on db + s3mock + mailpit `service_healthy`, port 3000; `SMTP_URL` defaults to `smtp://mailpit:1025`.
   - db: `postgres:17`, named volume, `pg_isready` healthcheck.
   - s3mock: `adobe/s3mock:5.2.3`, `COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=multiposter`, port 9090, wget healthcheck.
+  - mailpit: `axllent/mailpit`, SMTP 1025, web UI 8025, `readyz` healthcheck.
 - `.env.example`: every var from §3.
 - `.github/workflows/ci.yml` on push/PR:
-  - test: checkout v7, setup-node v7 (node 24, cache npm), services postgres:17 + s3mock; `npm ci`, `npm run lint`,
+  - test: checkout v7, setup-node v7 (node 24, cache npm), services postgres:17 + s3mock + mailpit; `npm ci`, `npm run lint`,
     `npx tsc --noEmit`, `npm test -- --coverage`.
   - docker: `docker build .`.
 

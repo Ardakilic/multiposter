@@ -1,15 +1,14 @@
 import { and, eq, gt } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { getConfig } from '../config';
+import { sha256 } from '../crypto';
 import { db } from '../db/client';
 import { sessions, users } from '../db/schema';
 
 export const SESSION_COOKIE = 'session';
 const DAY_MS = 86_400_000;
-
-const sha256 = (token: string) => createHash('sha256').update(token).digest('hex');
 
 /** Store only the SHA-256 of a random token; the raw token lives only in the httpOnly cookie. */
 export async function createSession(userId: string) {

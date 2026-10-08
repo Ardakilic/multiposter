@@ -10,17 +10,28 @@ const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull(
 
 export const postStatus = pgEnum('post_status', ['scheduled', 'publishing', 'published', 'partial', 'failed', 'cancelled']);
 export const targetStatus = pgEnum('target_status', ['pending', 'published', 'failed']);
+export const emailTokenPurpose = pgEnum('email_token_purpose', ['verify', 'reset']);
 
 export const users = pgTable('users', {
   id: id(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: createdAt(),
 });
 
 export const sessions = pgTable('sessions', {
   id: id(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+});
+
+export const emailTokens = pgTable('email_tokens', {
+  id: id(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  purpose: emailTokenPurpose('purpose').notNull(),
   tokenHash: text('token_hash').notNull().unique(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: createdAt(),

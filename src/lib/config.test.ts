@@ -21,8 +21,10 @@ describe('getConfig', () => {
       MAX_UPLOAD_MB: 50,
       ALLOW_REGISTRATION: true,
       COOKIE_SECURE: false,
+      MAIL_FROM: 'no-reply@localhost',
     });
     expect(c.S3_PUBLIC_URL).toBeUndefined();
+    expect(c.SMTP_URL).toBeUndefined();
     vi.stubEnv('APP_NAME', 'Changed');
     expect(getConfig()).toBe(c);
     resetConfig();
