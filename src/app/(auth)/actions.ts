@@ -9,8 +9,7 @@ import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
-import { createSession, destroySession } from '@/lib/auth/session';
-import { getConfig } from '@/lib/config';
+import { createSession, destroySession, registrationOpen } from '@/lib/auth/session';
 import { db } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 
@@ -27,9 +26,9 @@ const loginSchema = z.object({ email, password: z.string().min(1).max(1024) });
 // Compared against when the email is unknown, so response time doesn't reveal which emails exist.
 let dummyHash: Promise<string> | undefined;
 
-/** Create an account and sign in. Disabled when ALLOW_REGISTRATION is false. */
+/** Create an account and sign in. Refused when registration is closed (see registrationOpen). */
 export async function register(_: FormState, form: FormData): Promise<FormState> {
-  if (!getConfig().ALLOW_REGISTRATION) return { error: 'Registration is disabled.' };
+  if (!(await registrationOpen())) return { error: 'Registration is disabled.' };
   const parsed = registerSchema.safeParse({ email: form.get('email') ?? '', password: form.get('password') ?? '' });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const passwordHash = await hashPassword(parsed.data.password);

@@ -17,7 +17,7 @@ Next.js + PostgreSQL + S3-compatible storage, shipped as one Docker image.
 
 ```sh
 cp .env.example .env          # then set APP_SECRET to a random string of 32+ chars
-docker compose up --build
+docker compose up --build     # or `make up` (same, detached)
 ```
 
 To run the published image instead of building, swap `build: .` for the commented `image:` line in
@@ -25,6 +25,12 @@ To run the published image instead of building, swap `build: .` for the commente
 
 Open http://localhost:3000 and register. Compose starts the app, PostgreSQL 17 and S3Mock (local S3).
 Migrations and the bucket are created when the app starts.
+
+**Accounts.** There is no seeded user or generated password: the first person to open the app registers, even
+with `ALLOW_REGISTRATION=false`. There is no admin interface; every user manages only their own connections and
+posts. The app sends no email, so there is no SMTP setting and no password reset (reset a password by deleting the
+user row and registering again). Migrations run automatically at startup from `drizzle/`; there is no seeder
+because none is needed.
 
 ## Configuration
 
@@ -51,7 +57,7 @@ All settings are env vars (`.env`). They are validated at startup; invalid value
 | `SESSION_TTL_DAYS` | `30` | Login session lifetime |
 | `COOKIE_SECURE` | `auto` | `auto` = secure cookies when `NODE_ENV=production`; or `true` / `false` |
 | `MAX_UPLOAD_MB` | `50` | Max size per uploaded file |
-| `ALLOW_REGISTRATION` | `true` | `false` hides and blocks `/register` |
+| `ALLOW_REGISTRATION` | `true` | `false` hides and blocks `/register` once the first account exists |
 
 `MAX_UPLOAD_MB` can only lower the limit: the request body cap (`bodySizeLimit` in `next.config.ts`) is fixed at
 50 MB at build time. Raising it needs an edit there and a rebuild.
@@ -127,6 +133,22 @@ npm run dev                # needs .env with localhost DATABASE_URL / S3_ENDPOIN
 Tests use `TEST_DATABASE_URL` (default `postgres://postgres:postgres@localhost:5432/multiposter_test`, created if
 missing) and `TEST_S3_ENDPOINT` (default `http://localhost:9090`); they never read `.env`.
 Schema changes: edit `src/lib/db/schema.ts`, run `npm run db:generate`, commit `drizzle/`.
+
+### Using make
+
+Runs everything in a `node:24-slim` container (compose `dev` profile, own `node_modules` volume); no host Node needed.
+`make` alone lists the targets.
+
+- `make install`: `npm ci`
+- `make dev`: dev server on http://localhost:3000
+- `make test`: tests with coverage against the compose Postgres + S3Mock
+- `make lint` / `make typecheck` / `make build`
+- `make db-generate`: write a migration into `drizzle/`
+- `make shell`: shell in the dev container
+- `make up` / `make down` / `make logs`: production image (`app`), stop, follow app logs
+- `make clean`: stop everything and delete volumes (DB data included)
+
+The `dev` service and the production `app` service both use port 3000, so run one or the other.
 
 ## CI
 

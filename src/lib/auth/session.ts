@@ -49,3 +49,9 @@ export async function getUser() {
 export async function requireUser() {
   return (await getUser()) ?? redirect('/login');
 }
+
+/** Open when ALLOW_REGISTRATION is on, or while no account exists (so the first user can always sign up). */
+export async function registrationOpen() {
+  // ponytail: check-then-insert, two simultaneous first sign-ups can both get in; fine for self-hosting
+  return getConfig().ALLOW_REGISTRATION || !(await db.select({ id: users.id }).from(users).limit(1)).length;
+}

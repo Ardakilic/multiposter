@@ -42,10 +42,17 @@ describe('register', () => {
     });
   });
 
-  it('is refused when registration is disabled', async () => {
+  it('is refused when registration is disabled and an account exists', async () => {
     vi.stubEnv('ALLOW_REGISTRATION', 'false');
+    await db.insert(users).values({ email: 'first@example.com', passwordHash: 'x' });
     expect(await register(undefined, creds('a@b.co', 'password1'))).toEqual({ error: 'Registration is disabled.' });
-    expect(await db.select().from(users)).toHaveLength(0);
+    expect(await db.select().from(users)).toHaveLength(1);
+  });
+
+  it('lets the first user register even when registration is disabled', async () => {
+    vi.stubEnv('ALLOW_REGISTRATION', 'false');
+    await expect(register(undefined, creds('first@example.com', 'password1'))).rejects.toThrow('REDIRECT /compose');
+    expect(await db.select().from(users)).toHaveLength(1);
   });
 });
 
@@ -84,15 +91,19 @@ describe('pages', () => {
     expect(html).toContain('href="/register"');
   });
 
-  it('login page hides the register link when registration is disabled', async () => {
+  it('login page hides the register link when registration is disabled, unless there are no users', async () => {
     vi.stubEnv('ALLOW_REGISTRATION', 'false');
+    expect(renderToStaticMarkup(await LoginPage())).toContain('href="/register"');
+    await db.insert(users).values({ email: 'first@example.com', passwordHash: 'x' });
     expect(renderToStaticMarkup(await LoginPage())).not.toContain('/register');
   });
 
-  it('register page renders, or 404s when disabled', async () => {
+  it('register page renders, or 404s when disabled and an account exists', async () => {
     expect(renderToStaticMarkup(await RegisterPage())).toContain('minLength="8"');
     vi.stubEnv('ALLOW_REGISTRATION', 'false');
     resetConfig();
+    expect(renderToStaticMarkup(await RegisterPage())).toContain('minLength="8"');
+    await db.insert(users).values({ email: 'first@example.com', passwordHash: 'x' });
     await expect(RegisterPage()).rejects.toThrow('NOT_FOUND');
   });
 

@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetConfig } from '../config';
 import { db } from '../db/client';
 import { sessions, users } from '../db/schema';
-import { createSession, destroySession, getUser, requireUser, SESSION_COOKIE } from './session';
+import { createSession, destroySession, getUser, registrationOpen, requireUser, SESSION_COOKIE } from './session';
 
 const jar = new Map<string, { value: string; opts?: Record<string, unknown> }>();
 vi.mock('next/headers', () => ({
@@ -24,6 +25,7 @@ async function makeUser() {
 }
 
 beforeEach(() => jar.clear());
+afterEach(() => vi.unstubAllEnvs());
 
 describe('session', () => {
   it('creates a session cookie and resolves the user', async () => {
@@ -59,5 +61,19 @@ describe('session', () => {
     expect(jar.has(SESSION_COOKIE)).toBe(false);
     expect(await db.select().from(sessions)).toHaveLength(0);
     await destroySession(); // no cookie: no-op
+  });
+});
+
+describe('registrationOpen', () => {
+  it('is open when allowed, or while there are no users', async () => {
+    expect(await registrationOpen()).toBe(true);
+    vi.stubEnv('ALLOW_REGISTRATION', 'false');
+    resetConfig();
+    expect(await registrationOpen()).toBe(true);
+    await makeUser();
+    expect(await registrationOpen()).toBe(false);
+    vi.unstubAllEnvs();
+    resetConfig();
+    expect(await registrationOpen()).toBe(true);
   });
 });

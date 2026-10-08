@@ -78,7 +78,7 @@ works without env).
 | SESSION_TTL_DAYS | `30` | |
 | COOKIE_SECURE | `auto` | auto = true when NODE_ENV=production |
 | MAX_UPLOAD_MB | `50` | also drives `experimental.serverActions.bodySizeLimit` (see §12) |
-| ALLOW_REGISTRATION | `true` | `false` hides + blocks /register |
+| ALLOW_REGISTRATION | `true` | `false` hides + blocks /register once the first account exists |
 
 S3 client: `forcePathStyle`, `requestChecksumCalculation: 'WHEN_REQUIRED'`,
 `responseChecksumValidation: 'WHEN_REQUIRED'` (S3Mock / non-AWS compatibility).
@@ -111,7 +111,8 @@ drizzle; uuid PKs `defaultRandom()`; all timestamps `timestamptz`.
 - `requireUser()`: cookie → session (unexpired) → user, else `redirect('/login')`. Called in every page and action.
 - No `proxy.ts` (Next 16's renamed middleware). Not needed: Next docs support auth checks directly in page
   components; server actions re-check themselves anyway.
-- ALLOW_REGISTRATION=false: register link hidden, page and action refuse.
+- Registration is open when ALLOW_REGISTRATION=true or the users table is empty (`registrationOpen()`); otherwise
+  the register link is hidden and page and action refuse.
 
 ## 6. Connector contract (`src/lib/connectors/types.ts`)
 
@@ -282,7 +283,7 @@ Tailwind, minimal, forms + server actions, `useActionState` for errors. Layout n
 | Route | Content |
 |---|---|
 | `/` | redirect → `/compose` (or `/login`) |
-| `/login`, `/register` | email + password; register hidden when ALLOW_REGISTRATION=false |
+| `/login`, `/register` | email + password; register hidden when registration is closed (`registrationOpen()`) |
 | `/connections` | list (label, account, connector) + delete; add form: pick connector → inputs from `fields` (secret → password input) + label → verify → save encrypted; shows provider help text |
 | `/compose` | items list (add/remove; each: textarea with live length vs strictest selected limit, multiple file input, alt text), connection checkboxes, "Auto-split into threads when too long", optional `datetime-local`; submit → upload media → insert post/items/media/targets, status `scheduled` |
 | `/posts` | newest first; status badge; scheduled/published time; item text preview; per-target status + link or error; cancel for scheduled |
