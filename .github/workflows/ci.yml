@@ -17,7 +17,7 @@ jobs:
         image: adobe/s3mock:5.2.3
         ports: ["9090:9090"]
       mailpit:
-        image: axllent/mailpit:v1.31.4
+        image: axllent/mailpit:v1.31.6
         ports: ["1025:1025", "8025:8025"]
         options: >-
           --health-cmd "/mailpit readyz" --health-interval 2s --health-timeout 5s --health-retries 15

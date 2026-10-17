@@ -48,7 +48,7 @@ services:
 
   # catches all outgoing mail; web UI at http://localhost:8025
   mailpit:
-    image: axllent/mailpit:v1.31.4
+    image: axllent/mailpit:v1.31.6
     ports:
       - "1025:1025"
       - "8025:8025"
